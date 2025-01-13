@@ -104,35 +104,11 @@ class ApiService {
 
   Future<List<Product>> _searchBim(String query) async {
     try {
-      // Add delay to respect rate limiting
       await Future.delayed(const Duration(milliseconds: 500));
-
-      // Get the session ID first
-      final sessionResponse = await http.get(
-        Uri.parse('https://www.bim.com.tr'),
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept':
-              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
-      );
-
-      // Extract session ID from cookies
-      String? sessionId;
-      if (sessionResponse.headers['set-cookie'] != null) {
-        final cookieHeader = sessionResponse.headers['set-cookie']!;
-        final sessionMatch =
-            RegExp(r'ASP\.NET_SessionId=([^;]+)').firstMatch(cookieHeader);
-        if (sessionMatch != null) {
-          sessionId = sessionMatch.group(1);
-        }
-      }
 
       final response = await http.get(
         Uri.parse(
-            'https://www.bim.com.tr/Categories/680/arama.aspx?query=${Uri.encodeComponent(query)}'),
+            'https://www.bim.com.tr/arama?q=${Uri.encodeComponent(query)}'),
         headers: {
           'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -142,56 +118,45 @@ class ApiService {
           'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
           'Referer': 'https://www.bim.com.tr/',
-          'Cookie': sessionId != null ? 'ASP.NET_SessionId=$sessionId' : '',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'same-origin',
-          'Sec-Fetch-User': '?1',
-          'Upgrade-Insecure-Requests': '1',
         },
       );
 
       print('BİM response status: ${response.statusCode}');
       print('BİM response body length: ${response.body.length}');
-      print('Response headers: ${response.headers}');
 
       if (response.statusCode == 200) {
         final List<Product> products = [];
         final soup = BeautifulSoup(response.body);
 
-        // Print sample of HTML for debugging
-        print(
-            'HTML sample: ${response.body.substring(0, min(500, response.body.length))}');
+        // Print full HTML for debugging
+        print('Full HTML: ${response.body}');
 
-        // Updated selectors based on BİM's HTML structure
+        // Try different selectors for product containers
         final productElements =
-            soup.findAll('div', class_: 'product-card-list') ??
-                soup.findAll('div', class_: 'product-item') ??
-                soup.findAll('div', class_: 'product-list-item') ??
-                soup.findAll('div', class_: 'product-box');
+            soup.findAll('div', class_: 'product-wrapper') ??
+                soup.findAll('div', class_: 'product-item-wrapper') ??
+                soup.findAll('div', class_: 'product-list-wrapper');
 
         print('Found ${productElements.length} product elements');
 
         for (var element in productElements) {
           try {
-            final nameElement =
-                element.find('h3', class_: 'product-card-title') ??
-                    element.find('h3', class_: 'name') ??
-                    element.find('div', class_: 'name');
+            // Try different selectors for product details
+            final nameElement = element.find('h2') ??
+                element.find('div', class_: 'title') ??
+                element.find('div', class_: 'description');
 
-            final priceElement =
-                element.find('div', class_: 'product-card-price') ??
-                    element.find('span', class_: 'current-price') ??
-                    element.find('div', class_: 'price');
+            final priceElement = element.find('div', class_: 'price') ??
+                element.find('span', class_: 'amount');
 
-            final imageElement =
-                element.find('img', class_: 'product-card-image') ??
-                    element.find('img');
+            final imageElement = element.find('img');
+
+            if (nameElement != null) {
+              print('Found name element: ${nameElement.text}');
+            }
+            if (priceElement != null) {
+              print('Found price element: ${priceElement.text}');
+            }
 
             if (nameElement != null && priceElement != null) {
               final name = nameElement.text.trim();
