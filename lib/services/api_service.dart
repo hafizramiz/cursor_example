@@ -104,93 +104,114 @@ class ApiService {
 
   Future<List<Product>> _searchBim(String query) async {
     try {
-      await _respectRateLimit();
-
       final response = await http.get(
         Uri.parse(
-            'https://www.bim.com.tr/Categories/100/arama.aspx?query=${Uri.encodeComponent(query)}'),
+            'https://www.bim.com.tr/arama?q=${Uri.encodeComponent(query)}'),
         headers: {
-          'User-Agent': _getRandomUserAgent(),
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
           'Accept':
               'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
         },
       );
 
+      print('BİM response status: ${response.statusCode}');
+      print('BİM response body length: ${response.body.length}');
+
       if (response.statusCode == 200) {
         final List<Product> products = [];
         final soup = BeautifulSoup(response.body);
 
-        // Find all product containers
-        final productElements = soup.findAll('div', class_: 'product-card');
+        // Print the entire HTML for debugging
+        print('Full HTML: ${response.body}');
+
+        // Find all product containers with the correct class
+        final productElements =
+            soup.findAll('div', class_: 'product-card-list');
+
+        print('Found ${productElements.length} product elements');
 
         for (var element in productElements) {
           try {
-            // Extract product name
-            final nameElement = element.find('h5', class_: 'card-title') ??
-                element.find('h3', class_: 'name');
+            // Find product name
+            final nameElement =
+                element.find('h3', class_: 'product-card-title');
 
-            // Extract price
+            // Find price
             final priceElement =
-                element.find('span', class_: 'current-price') ??
-                    element.find('div', class_: 'price');
+                element.find('div', class_: 'product-card-price');
 
-            // Extract image
-            final imageElement = element.find('img', class_: 'card-img-top') ??
-                element.find('img', class_: 'lazy');
+            // Find image
+            final imageElement =
+                element.find('img', class_: 'product-card-image');
 
             if (nameElement != null && priceElement != null) {
-              final name = _cleanProductName(nameElement.text);
-              final priceText = _extractPrice(priceElement.text);
-              final price =
-                  double.tryParse(priceText.replaceAll(',', '.')) ?? 0.0;
+              final name = nameElement.text.trim();
 
+              // Extract price and clean it
+              final priceText = priceElement.text
+                  .replaceAll(RegExp(r'[^\d,.]'), '')
+                  .replaceAll(',', '.')
+                  .trim();
+
+              final price = double.tryParse(priceText) ?? 0.0;
+
+              // Get image URL
               String? imageUrl = imageElement?.attributes['src'] ??
                   imageElement?.attributes['data-src'];
 
               // Skip invalid products
               if (price <= 0 || name.isEmpty) {
+                print('Skipping invalid product: $name, price: $price');
                 continue;
               }
 
-              // Add product to list
+              // Add valid product
               products.add(Product(
                 name: name,
-                imageUrl: _normalizeImageUrl(imageUrl ?? '', 'bim.com.tr'),
+                imageUrl: imageUrl ?? '',
                 prices: {'BİM': price},
                 unit: _extractUnit(name),
               ));
 
-              print('Found BİM product: $name at price: $price');
+              print('Successfully added product: $name at price: $price');
             }
           } catch (e) {
-            print('Error parsing BİM product: $e');
+            print('Error parsing product element: $e');
             continue;
           }
         }
 
         if (products.isEmpty) {
-          print('No products found at BİM for query: $query');
+          print('No products found in HTML response');
         }
 
         return products;
       } else {
-        print('BİM website returned status code: ${response.statusCode}');
+        print('BİM website returned error status: ${response.statusCode}');
         throw Exception('Failed to load BİM products: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error scraping BİM website: $e');
+      print('Error in _searchBim: $e');
       return [];
     }
   }
 
-  // Helper methods for BİM scraping
   String _cleanProductName(String name) {
-    return name
-        .trim()
+    // Remove extra whitespace and normalize Turkish characters
+    name = name
         .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll(RegExp(r'[^\w\s\-\(\)ğüşıöçĞÜŞİÖÇ]'), '')
-        .trim();
+        .trim()
+        .toLowerCase()
+        .replaceAll('ı', 'i')
+        .replaceAll('ğ', 'g')
+        .replaceAll('ü', 'u')
+        .replaceAll('ş', 's')
+        .replaceAll('ö', 'o')
+        .replaceAll('ç', 'c');
+
+    return name;
   }
 
   String _extractPrice(String priceText) {
@@ -267,7 +288,9 @@ class ApiService {
     // Remove common variations and units
     name = name
         .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll(RegExp(r'\d+\s*(ml|gr|g|kg|l|lt)'), '')
+        .replaceAll(
+            RegExp(r'\d+\s*(ml|gr|g|kg|l|lt|gram|kilogram|litre|mililetre))'),
+            '')
         .replaceAll(RegExp(r'[\(\)]'), '')
         .trim();
 
