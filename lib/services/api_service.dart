@@ -3,6 +3,7 @@ import 'package:beautiful_soup_dart/beautiful_soup.dart';
 import 'dart:convert';
 import '../models/product.dart';
 import '../models/market_source.dart';
+import 'dart:math';
 
 class ApiService {
   // Migros API
@@ -17,43 +18,15 @@ class ApiService {
 
   Future<List<Product>> searchProducts(String query) async {
     try {
-      // Fetch from multiple sources concurrently
-      final results = await Future.wait([
-        _searchMigros(query),
-        _searchA101(query),
-        _searchBim(query),
-      ]);
+      // Fetch from BİM using web scraping
+      final bimProducts = await _searchBim(query);
 
-      // Combine and normalize results
-      final List<Product> products = [];
-      final Map<String, Map<String, double>> priceMap = {};
-
-      // Process results from each source
-      for (var sourceProducts in results) {
-        for (var product in sourceProducts) {
-          String normalizedName = _normalizeProductName(product.name);
-
-          if (!priceMap.containsKey(normalizedName)) {
-            priceMap[normalizedName] = {};
-          }
-
-          priceMap[normalizedName]?.addAll(product.prices);
-        }
-      }
-
-      // Create combined products
-      priceMap.forEach((name, prices) {
-        products.add(Product(
-          name: name,
-          imageUrl: '', // Use the first available image
-          prices: prices,
-          unit: _extractUnit(name),
-        ));
-      });
-
-      return products;
+      // For now, we'll only return BİM products
+      // Later we can add Migros and A101 when their APIs are implemented
+      return bimProducts;
     } catch (e) {
-      throw Exception('Error fetching products: $e');
+      print('Error in searchProducts: $e');
+      return [];
     }
   }
 
@@ -131,13 +104,13 @@ class ApiService {
 
   Future<List<Product>> _searchBim(String query) async {
     try {
-      // First, get the search results page
+      await _respectRateLimit();
+
       final response = await http.get(
         Uri.parse(
             'https://www.bim.com.tr/Categories/100/arama.aspx?query=${Uri.encodeComponent(query)}'),
         headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'User-Agent': _getRandomUserAgent(),
           'Accept':
               'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -153,58 +126,130 @@ class ApiService {
 
         for (var element in productElements) {
           try {
-            // Extract product details
-            final nameElement = element.find('h3', class_: 'product-name');
-            final priceElement = element.find('span', class_: 'current-price');
-            final imageElement = element.find('img', class_: 'product-image');
+            // Extract product name
+            final nameElement = element.find('h5', class_: 'card-title') ??
+                element.find('h3', class_: 'name');
+
+            // Extract price
+            final priceElement =
+                element.find('span', class_: 'current-price') ??
+                    element.find('div', class_: 'price');
+
+            // Extract image
+            final imageElement = element.find('img', class_: 'card-img-top') ??
+                element.find('img', class_: 'lazy');
 
             if (nameElement != null && priceElement != null) {
-              final name = nameElement.text.trim();
-              final priceText = priceElement.text
-                  .trim()
-                  .replaceAll('TL', '')
-                  .replaceAll(',', '.')
-                  .trim();
-              final price = double.tryParse(priceText) ?? 0.0;
-              final imageUrl = imageElement?.attributes['src'] ?? '';
+              final name = _cleanProductName(nameElement.text);
+              final priceText = _extractPrice(priceElement.text);
+              final price =
+                  double.tryParse(priceText.replaceAll(',', '.')) ?? 0.0;
 
+              String? imageUrl = imageElement?.attributes['src'] ??
+                  imageElement?.attributes['data-src'];
+
+              // Skip invalid products
+              if (price <= 0 || name.isEmpty) {
+                continue;
+              }
+
+              // Add product to list
               products.add(Product(
                 name: name,
-                imageUrl: imageUrl.startsWith('http')
-                    ? imageUrl
-                    : 'https://www.bim.com.tr$imageUrl',
+                imageUrl: _normalizeImageUrl(imageUrl ?? '', 'bim.com.tr'),
                 prices: {'BİM': price},
                 unit: _extractUnit(name),
               ));
+
+              print('Found BİM product: $name at price: $price');
             }
           } catch (e) {
-            print('Error parsing product element: $e');
+            print('Error parsing BİM product: $e');
             continue;
           }
         }
 
+        if (products.isEmpty) {
+          print('No products found at BİM for query: $query');
+        }
+
         return products;
       } else {
-        throw Exception('BİM website error: ${response.statusCode}');
+        print('BİM website returned status code: ${response.statusCode}');
+        throw Exception('Failed to load BİM products: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching from BİM: $e');
+      print('Error scraping BİM website: $e');
       return [];
     }
   }
 
-  // Add rate limiting functionality
+  // Helper methods for BİM scraping
+  String _cleanProductName(String name) {
+    return name
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[^\w\s\-\(\)ğüşıöçĞÜŞİÖÇ]'), '')
+        .trim();
+  }
+
+  String _extractPrice(String priceText) {
+    // Remove currency symbol and normalize decimal separator
+    return priceText
+        .replaceAll(RegExp(r'[^\d,.]'), '')
+        .replaceAll(',', '.')
+        .trim();
+  }
+
+  String _normalizeImageUrl(String url, String domain) {
+    if (url.isEmpty) return '';
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('//')) return 'https:$url';
+    return 'https://$domain$url';
+  }
+
+  String _getRandomUserAgent() {
+    final userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59',
+    ];
+    return userAgents[
+        DateTime.now().millisecondsSinceEpoch % userAgents.length];
+  }
+
+  // Enhanced rate limiting
   DateTime? _lastBimRequest;
-  static const _minRequestInterval = Duration(seconds: 2);
+  static const _minRequestInterval = Duration(seconds: 3);
+  int _consecutiveFailures = 0;
+  static const _maxRetries = 3;
 
   Future<void> _respectRateLimit() async {
     if (_lastBimRequest != null) {
       final timeSinceLastRequest = DateTime.now().difference(_lastBimRequest!);
-      if (timeSinceLastRequest < _minRequestInterval) {
-        await Future.delayed(_minRequestInterval - timeSinceLastRequest);
+      final waitTime = _minRequestInterval * (_consecutiveFailures + 1);
+
+      if (timeSinceLastRequest < waitTime) {
+        await Future.delayed(waitTime - timeSinceLastRequest);
       }
     }
     _lastBimRequest = DateTime.now();
+  }
+
+  Future<T> _withRetry<T>(Future<T> Function() operation) async {
+    for (int i = 0; i < _maxRetries; i++) {
+      try {
+        final result = await operation();
+        _consecutiveFailures = 0;
+        return result;
+      } catch (e) {
+        _consecutiveFailures++;
+        if (i == _maxRetries - 1) rethrow;
+        await Future.delayed(Duration(seconds: pow(2, i).toInt()));
+      }
+    }
+    throw Exception('Max retries exceeded');
   }
 
   // Enhance the normalize function for better product matching
