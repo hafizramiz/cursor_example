@@ -107,28 +107,52 @@ class ApiService {
       // Add delay to respect rate limiting
       await Future.delayed(const Duration(milliseconds: 500));
 
-      final response = await http.get(
-        Uri.parse(
-            'https://www.bim.com.tr/Categories/100/search.aspx?query=${Uri.encodeComponent(query)}'),
+      // Get the session ID first
+      final sessionResponse = await http.get(
+        Uri.parse('https://www.bim.com.tr'),
         headers: {
           'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept':
               'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'tr-TR,tr;q=0.9',
+          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+      );
+
+      // Extract session ID from cookies
+      String? sessionId;
+      if (sessionResponse.headers['set-cookie'] != null) {
+        final cookieHeader = sessionResponse.headers['set-cookie']!;
+        final sessionMatch =
+            RegExp(r'ASP\.NET_SessionId=([^;]+)').firstMatch(cookieHeader);
+        if (sessionMatch != null) {
+          sessionId = sessionMatch.group(1);
+        }
+      }
+
+      final response = await http.get(
+        Uri.parse(
+            'https://www.bim.com.tr/Categories/680/arama.aspx?query=${Uri.encodeComponent(query)}'),
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
           'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
-          'Cache-Control': 'max-age=0',
+          'Referer': 'https://www.bim.com.tr/',
+          'Cookie': sessionId != null ? 'ASP.NET_SessionId=$sessionId' : '',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
           'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
           'Sec-Ch-Ua-Mobile': '?0',
           'Sec-Ch-Ua-Platform': '"Windows"',
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-Site': 'same-origin',
           'Sec-Fetch-User': '?1',
           'Upgrade-Insecure-Requests': '1',
-          'Cookie':
-              'ASP.NET_SessionId=${DateTime.now().millisecondsSinceEpoch}',
         },
       );
 
@@ -144,24 +168,30 @@ class ApiService {
         print(
             'HTML sample: ${response.body.substring(0, min(500, response.body.length))}');
 
-        // Try multiple selectors for product containers
-        final productElements = soup.findAll('div', class_: 'product-card') ??
-            soup.findAll('div', class_: 'product-item') ??
-            soup.findAll('div', class_: 'product-list-item');
+        // Updated selectors based on BİM's HTML structure
+        final productElements =
+            soup.findAll('div', class_: 'product-card-list') ??
+                soup.findAll('div', class_: 'product-item') ??
+                soup.findAll('div', class_: 'product-list-item') ??
+                soup.findAll('div', class_: 'product-box');
 
         print('Found ${productElements.length} product elements');
 
         for (var element in productElements) {
           try {
-            final nameElement = element.find('h2') ??
-                element.find('h3') ??
-                element.find('div', class_: 'name');
+            final nameElement =
+                element.find('h3', class_: 'product-card-title') ??
+                    element.find('h3', class_: 'name') ??
+                    element.find('div', class_: 'name');
 
             final priceElement =
-                element.find('span', class_: 'current-price') ??
+                element.find('div', class_: 'product-card-price') ??
+                    element.find('span', class_: 'current-price') ??
                     element.find('div', class_: 'price');
 
-            final imageElement = element.find('img');
+            final imageElement =
+                element.find('img', class_: 'product-card-image') ??
+                    element.find('img');
 
             if (nameElement != null && priceElement != null) {
               final name = nameElement.text.trim();
