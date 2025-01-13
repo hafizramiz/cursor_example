@@ -289,7 +289,7 @@ class ApiService {
     name = name
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAll(
-            RegExp(r'\d+\s*(ml|gr|g|kg|l|lt|gram|kilogram|litre|mililetre))'),
+            RegExp(r'\d+\s*(ml|gr|g|kg|l|lt|gram|kilogram|litre|mililetre)'),
             '')
         .replaceAll(RegExp(r'[\(\)]'), '')
         .trim();
