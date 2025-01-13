@@ -1,0 +1,28 @@
+name: cursor_example
+description: "A price comparison app for Turkish markets"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.6 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  http: ^1.1.0
+  provider: ^6.0.5
+  cached_network_image: ^3.2.3
+  flutter_dotenv: ^5.1.0
+  html: ^0.15.4
+  beautiful_soup_dart: ^0.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
