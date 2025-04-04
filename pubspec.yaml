@@ -18,6 +18,9 @@ dependencies:
   beautiful_soup_dart: ^0.3.0
   flutter_command: ^7.0.0
 
+  restrictedmodule:
+    path: ./restrictedmodule
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
